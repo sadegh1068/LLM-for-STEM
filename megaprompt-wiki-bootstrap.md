@@ -1,4 +1,4 @@
-# Mega-Prompt: Bootstrap a Subject-Tailored LLM-Wiki (v2)
+# Mega-Prompt: Bootstrap a Subject-Tailored LLM-Wiki (v3)
 
 **How to use this (for the human).** Open Claude Code in a new, empty folder that
 will become your knowledge base. Have 3 to 5 representative sources ready (papers,
@@ -269,6 +269,19 @@ every file in `raw/` must classify as primary (has a source page), supplement
 (attached to a primary), or not-yet-ingested, with NO remainder, and the counts are
 recomputed from disk, never decremented from the previous figure.
 
+**RESOLVE** (open questions against the wider literature): a question that is open in
+the vault may only be open *in the vault*; the answer can sit in a paper or book not
+yet in `raw/`. Run it once the first sources are ingested, and again after each wave.
+For each open-problem page (and each tension whose settling action is "read X"):
+(1) state what evidence would answer it; (2) search the literature beyond `raw/` for
+candidate sources, never answering from memory or from an abstract alone; (3) propose
+the candidates, WAIT for approval, then get them through ACQUIRE and turn them into
+pages through INGEST and VERIFY; (4) update the page's status to `answered` (linking
+the source pages that answer it), `partially answered`, or `open`, and record the
+search itself (date, queries, databases, what was found or not). A question is trusted
+as open only after a recorded search came back empty; until then its status is
+`open (unsearched)`.
+
 **SCHEMA-REVISION CHECKPOINT**: re-run section A5 every 5 to 10 new sources. When a
 checkpoint proposes no new folders twice in a row, **freeze the schema** and record the
 freeze in `CLAUDE.md`. After a freeze, a new page-type needs an explicit decision, not
@@ -379,7 +392,8 @@ in LINT.
   per-source `README.md` with attribution and a personal-research-use notice.
 - **Decisions and open problems**: if the subject involves choices you make or
   questions you track, add `decisions/` (ADRs) and `open-problems/`, both with
-  zero-padded id-numbered filenames.
+  zero-padded id-numbered filenames. Open-problem pages carry a `status` field
+  (`open (unsearched)` / `open` / `partially answered` / `answered`) maintained by RESOLVE.
 
 ## GUARDRAILS (hold these the whole way through)
 - Folders earn their existence: at least 3 pages, or a strong stated reason. Do not
@@ -402,6 +416,14 @@ Begin with A1: ask the eight interview questions and wait. Do not scaffold or wr
 anything until the user has answered.
 
 ---
+
+## What changed in v3 (note for the human; not part of the prompt's instructions)
+
+1. **RESOLVE** is a new Stage B workflow: open problems are searched against the
+   literature beyond `raw/` before they are trusted as open. A question that is open
+   in the vault can be answered in a paper or book the vault does not have yet, so
+   "open" now means "a recorded search found no answer", and unsearched questions
+   are labelled `open (unsearched)`.
 
 ## What changed in v2 (note for the human; not part of the prompt's instructions)
 

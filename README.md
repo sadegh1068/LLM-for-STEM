@@ -37,6 +37,7 @@ confidence label.
 - Extraction fidelity rules (the PDF is the arbiter, conversions fail silently)
 - Wave-based ingestion, verification with drafter/checker separation
 - Tension pages: cross-paper contradictions get their own pages with verbatim quotes
+- Open problems checked against the wider literature before they count as open (v3)
 - Scale playbook for 50+ sources (index regeneration, citation reciprocity, linting)
 
 ## License
