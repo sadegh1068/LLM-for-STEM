@@ -10,6 +10,8 @@ Commands
   python yt_upload.py list                 your uploads (title -> video id) and playlists
   python yt_upload.py check  uploads.csv   validate every 'ready' row, no network
   python yt_upload.py upload uploads.csv   upload every 'ready' row  [--only ep04]
+  python yt_upload.py update uploads.csv   the .mp4 was uploaded by hand in YouTube Studio: find it
+                                           (YouTube titles it after the file name) and set everything else
 
 Secrets live in %USERPROFILE%\\.yt_uploader\\ (client_secret.json from Google Cloud,
 token.json written after the first login), never in the project folder.
@@ -239,6 +241,30 @@ def find_or_create_playlist(yt, title, privacy, cache):
     return pid
 
 
+def video_body(row, desc, tags, privacy, publish_at):
+    lang = row.get("language", "en").strip() or "en"
+    status = {
+        "privacyStatus": privacy,
+        "selfDeclaredMadeForKids": yes(row.get("made_for_kids", "no")),
+        "containsSyntheticMedia": yes(row.get("synthetic", "no")),
+        "license": "youtube",
+        "embeddable": True,
+    }
+    if publish_at:
+        status["publishAt"] = publish_at
+    return {
+        "snippet": {
+            "title": row["title"].strip(),
+            "description": desc,
+            "tags": tags,
+            "categoryId": row.get("category", "28").strip() or "28",
+            "defaultLanguage": lang,
+            "defaultAudioLanguage": lang,
+        },
+        "status": status,
+    }
+
+
 def upload_row(yt, row, base, rows, state, state_path, playlists):
     from googleapiclient.http import MediaFileUpload
     key = row["id"]
@@ -250,26 +276,7 @@ def upload_row(yt, row, base, rows, state, state_path, playlists):
     lang = row.get("language", "en").strip() or "en"
 
     if not st.get("video_id"):
-        status = {
-            "privacyStatus": privacy,
-            "selfDeclaredMadeForKids": yes(row.get("made_for_kids", "no")),
-            "containsSyntheticMedia": yes(row.get("synthetic", "no")),
-            "license": "youtube",
-            "embeddable": True,
-        }
-        if publish_at:
-            status["publishAt"] = publish_at
-        body = {
-            "snippet": {
-                "title": row["title"].strip(),
-                "description": desc,
-                "tags": tags,
-                "categoryId": row.get("category", "28").strip() or "28",
-                "defaultLanguage": lang,
-                "defaultAudioLanguage": lang,
-            },
-            "status": status,
-        }
+        body = video_body(row, desc, tags, privacy, publish_at)
         media = MediaFileUpload(str(base / row["video"]), chunksize=CHUNK, resumable=True,
                                 mimetype="video/*")
         req = yt.videos().insert(part="snippet,status", body=body, media_body=media,
@@ -390,12 +397,66 @@ def cmd_upload(args):
     print("Videos from an API project that has not passed Google's audit are locked to private.")
 
 
+def find_manual_upload(yt, row, base):
+    """Find a video uploaded by hand in YouTube Studio: YouTube titles it after the file name."""
+    stem = Path(row["video"]).stem
+    uploads = my_channel(yt)["contentDetails"]["relatedPlaylists"]["uploads"]
+    resp = yt.playlistItems().list(part="snippet", playlistId=uploads, maxResults=50).execute()
+    hits = [it["snippet"]["resourceId"]["videoId"] for it in resp.get("items", [])
+            if it["snippet"]["title"].strip() in {stem, Path(row["video"]).name}]
+    return hits
+
+
+def cmd_update(args):
+    """Fill in a video that was uploaded by hand in YouTube Studio (no API upload, so no audit lock)."""
+    if cmd_check(args):
+        sys.exit("Fix the problems above first (nothing was changed).")
+    csv_path = Path(args.csv).resolve()
+    rows = load_rows(csv_path)
+    state_path, state = load_state(csv_path)
+    yt = service()
+    print(f"Channel: {my_channel(yt)['snippet']['title']}")
+    playlists = {}
+    for r in selected(args, rows, state):
+        key, base = r["id"], csv_path.parent
+        st = state.setdefault(key, {})
+        print(f"\n[{key}] {r['title']}")
+        vid = st.get("video_id") or r.get("video_id", "").strip()
+        if not vid:
+            hits = find_manual_upload(yt, r, base)
+            if len(hits) != 1:
+                print(f"  found {len(hits)} uploads titled '{Path(r['video']).stem}' in Studio; "
+                      f"paste the right video id into the CSV's video_id column and re-run")
+                continue
+            vid = hits[0]
+        if not st.get("metadata_done"):
+            errors, desc, tags, privacy, publish_at = validate(r, base, rows, state)
+            body = video_body(r, desc, tags, privacy, publish_at)
+            body["id"] = vid
+            resp = yt.videos().update(part="snippet,status", body=body).execute()
+            st.update(video_id=vid, metadata_done=True, manual_upload=True,
+                      uploaded_at=dt.datetime.now().isoformat(timespec="seconds"))
+            save_state(state_path, state)
+            print(f"  https://youtu.be/{vid}  details set (privacy: {resp['status']['privacyStatus']})")
+        upload_row(yt, r, base, rows, state, state_path, playlists)  # thumbnail, captions, playlist
+        # Tags set while Studio is still processing a hand upload can be dropped: check and re-send once.
+        tags = [t.strip() for t in r.get("tags", "").split(",") if t.strip()]
+        snip = yt.videos().list(part="snippet", id=vid).execute()["items"][0]["snippet"]
+        if tags and not snip.get("tags"):
+            snip["tags"] = tags
+            yt.videos().update(part="snippet", body={"id": vid, "snippet": {
+                k: snip[k] for k in ("title", "description", "categoryId", "tags",
+                                     "defaultLanguage", "defaultAudioLanguage") if k in snip}}).execute()
+            print(f"  [{key}] tags were missing after processing; sent again")
+    print(f"\nProgress file: {state_path}")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("auth").set_defaults(fn=cmd_auth)
     sub.add_parser("list").set_defaults(fn=cmd_list)
-    for name, fn in (("check", cmd_check), ("upload", cmd_upload)):
+    for name, fn in (("check", cmd_check), ("upload", cmd_upload), ("update", cmd_update)):
         p = sub.add_parser(name)
         p.add_argument("csv")
         p.add_argument("--only", nargs="+", help="row ids, e.g. --only ep04")

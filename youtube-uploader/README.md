@@ -45,7 +45,14 @@ python yt_upload.py list                    # your uploads (video id, title) and
 python yt_upload.py check  uploads.csv      # validate every 'ready' row, no network
 python yt_upload.py upload uploads.csv      # upload every 'ready' row
 python yt_upload.py upload uploads.csv --only ep05
+python yt_upload.py update uploads.csv --only ep05   # video already uploaded by hand in YouTube Studio
 ```
+
+**Update mode.** Upload the `.mp4` yourself in YouTube Studio (keep the file name, choose
+"not made for kids", save as private), then run `update`. It finds the video by its file-name title
+(or by the `video_id` column) and sets the title, description, tags, category, language, privacy or
+scheduled time, thumbnail, subtitles and playlist. Tags sent while YouTube is still processing the
+video can be dropped, so `update` reads them back and sends them again if they are missing.
 
 The CSV columns are documented at the top of [yt_upload.py](yt_upload.py); a template is in
 [uploads.example.csv](uploads.example.csv).
